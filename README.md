@@ -1,5 +1,6 @@
 # cosign-tutorial
 
+### 環境変数
 ```
 export PROJECT_ID=linkerd-sandbox
 export REGION=asia-northeast1
@@ -13,6 +14,7 @@ export GSA_ID=${GSA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com
 roles="roles/logging.logWriter roles/monitoring.metricWriter roles/monitoring.viewer roles/cloudkms.viewer roles/cloudkms.verifier"
 ```
 
+### プロジェクト認証
 ```
 gcloud config set project ${PROJECT_ID}
 gcloud services enable cloudkms.googleapis.com
@@ -31,6 +33,7 @@ gcloud artifacts repositories create ${REGISTRY_NAME} \
     --location ${REGION}
 ```
 
+### Image を GAR に Push する
 ```
 docker pull nginx
 docker tag nginx ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REGISTRY_NAME}/nginx
@@ -38,6 +41,7 @@ gcloud auth configure-docker ${REGION}-docker.pkg.dev
 SHA=$(docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REGISTRY_NAME}/nginx | grep digest: | cut -f3 -d" ")
 ```
 
+### Cosign をインストールする
 ```
 apt update
 apt-get install -y jq
@@ -65,7 +69,7 @@ cosign verify \
     ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REGISTRY_NAME}/nginx@${SHA}
 ```
 
-``` Output similar to:
+```
 root@ec9e9d9e325c:/# cosign verify \
     --key gcpkms://projects/${PROJECT_ID}/locations/${REGION}/keyRings/${KEY_RING}/cryptoKeys/${KEY_NAME} \
     ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REGISTRY_NAME}/nginx@${SHA}
@@ -79,6 +83,7 @@ The following checks were performed on each of these signatures:
 root@ec9e9d9e325c:/# 
 ```
 
+# Cluster を作成する
 ```
 gcloud iam service-accounts create ${GSA_NAME} \
     --display-name ${GSA_NAME}
@@ -94,6 +99,7 @@ gcloud beta container --project "linkerd-sandbox" clusters create "cosign-b" --z
 gcloud beta container --project "linkerd-sandbox" node-pools create "pool-1" --cluster "cosign-b" --zone "asia-northeast1-c" --node-version "1.24.8-gke.2000" --machine-type "e2-standard-4" --image-type "COS_CONTAINERD" --disk-type "pd-balanced" --disk-size "100" --metadata disable-legacy-endpoints=true --scopes "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/cloudkms" --num-nodes "1" --enable-autoupgrade --enable-autorepair --max-surge-upgrade 1 --max-unavailable-upgrade 0 --max-pods-per-node "110"
 ```
 
+### Policy Controller をインストールする
 ```
 helm repo add sigstore https://sigstore.github.io/helm-charts
 helm repo update
@@ -102,6 +108,7 @@ helm install policy-controller \
     --create-namespace
 ```
 
+ ### 署名の取得元を定義する
 ```
 cat << EOF | kubectl apply -f -
 apiVersion: policy.sigstore.dev/v1alpha1
@@ -117,17 +124,23 @@ spec:
 EOF
 ```
 
+### Policy を有効化する
 ```
 kubectl create namespace test
 kubectl label namespace test policy.sigstore.dev/include=true
 ```
 
-``` Output similar to:
+### tag を指定しない
+```
 yamamoto_daisuke@cloudshell:~ (linkerd-sandbox)$ kubectl create deployment nginx \
     --image=nginx \
     -n test
 error: failed to create deployment: admission webhook "policy.sigstore.dev" denied the request: validation failed: failed policy: private-signed-images-cip: spec.template.spec.containers[0].image
 index.docker.io/library/nginx@sha256:c54fb26749e49dc2df77c6155e8b5f0f78b781b7f0eadd96ecfabdcdfa5b1ec4 signature key validation failed for authority authority-0 for index.docker.io/library/nginx@sha256:c54fb26749e49dc2df77c6155e8b5f0f78b781b7f0eadd96ecfabdcdfa5b1ec4: no matching signatures:
+```
+
+### tag を指定する
+```
 yamamoto_daisuke@cloudshell:~ (linkerd-sandbox)$ kubectl create deployment nginx \
     --image=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REGISTRY_NAME}/nginx@${SHA} \
     -n test
